@@ -19,11 +19,13 @@ can lag behind the types; when they disagree, trust the types.
 The upstream copy of this skill assumes bash and `jq`. Here everything runs in **PowerShell 7 on Windows** inside
 DSH. What that changes:
 
-- **`sctl` is not on `PATH`.** It is at `$env:LOCALAPPDATA\sctl\bin\sctl.exe`; the installer added that directory to
-  the *user* PATH, which a shell that was already running never re-reads. Set it once per session:
+- **`sctl` is not on `PATH`.** It is at `$env:LOCALAPPDATA\sctl\bin\sctl.exe`. The install wrote that directory to
+  the *user registry* PATH, but the DSH host started before that and every child inherits the host's environment
+  block, so nothing DSH spawns sees it. **Each tool call is also a fresh PowerShell process**, so a variable does not
+  survive from one call to the next — re-assign it every time:
 
   ```powershell
-  $sctl = "$env:LOCALAPPDATA\sctl\bin\sctl.exe"
+  $sctl = "$env:LOCALAPPDATA\sctl\bin\sctl.exe"   # needed again in every new shell call
   & $sctl status      # "extension connected: true" means the ScriptCat side is usable
   ```
 
@@ -41,12 +43,15 @@ DSH. What that changes:
   `service`, or a flag the MCP schema does not model.
 - **Approval is decided in the extension card** **工具 › 外部接入** of ScriptCat, not in sctl. On this machine both
   write and source-read policies were set to **直接允许**, so installs and edits land without a click. Do not change
-  that setting, and do not assume a silent success means a human reviewed it: state what changed.
-- **Node for `scripts/check.mjs`** is the DSH runtime: `& $env:DSH_NODE_EXECUTABLE scripts/check.mjs <file>`, or plain
-  `node` if it is on PATH in that shell.
+  that setting, and do not assume a silent success means a human reviewed it: state what changed. Note that a write
+  still prints `waiting for approval in the browser…` before validating — that is a progress line, not a pending
+  prompt.
+- **Node for `scripts/check.mjs`** is the DSH runtime: `& $env:DSH_NODE_EXECUTABLE`, or plain `node` if it is on PATH
+  in that shell. Point it at the checker's absolute path and at your script by absolute path.
 
-The sctl skill carries the full Windows/DSH notes (quoting rules, `page eval`, screenshot formats); read it too when
-the verification loop shows something odd.
+The sctl skill carries the full Windows/DSH notes (quoting rules, `page eval`, screenshot formats, the concurrency
+limit); read it too when the verification loop shows something odd. Its name is `sctl`; it sits beside this one in the
+same skills root.
 
 ## 1. Pick the script type
 
@@ -208,17 +213,23 @@ background run with retry.
 
 Writing the file is half the job; the other half is seeing it run.
 
-First run the static check bundled with this skill (Node 18+, no dependencies; paths are relative to this
-skill's directory):
+First run the static check bundled with this skill (Node 18+, no dependencies):
 
 ```powershell
-& $env:DSH_NODE_EXECUTABLE scripts/check.mjs my-script.user.js   # exit 1 = errors that will break the runtime
+# the checker path is absolute; the file argument resolves against the CURRENT directory
+& $env:DSH_NODE_EXECUTABLE "$env:DSH_HOME\skills\scriptcat-userscript\scripts\check.mjs" .\my-script.user.js
 ```
+
+Only the *checker* is addressed relative to the skill's directory. The script you check is resolved against the
+current working directory, so `cd`-ing into the skill directory and naming your file there fails with `ENOENT` —
+pass an absolute path, or run from the directory that holds the script.
 
 It reports `error|warn <rule> <file>:<line> <message>`: APIs used without their `@grant`, GM APIs or
 `unsafeWindow` under `@grant none`, a page script without `@match`, invalid `@crontab` expressions, request hosts
-missing from `@connect`, and similar. Fix every error; read each warning and fix it or say why it does not apply.
-It is a static check — it cannot tell whether the script does what the user asked.
+missing from `@connect`, and similar. Exit `1` means errors that will break the **script** at runtime; exit `2` is a
+usage error. Fix every error; read each warning and fix it or say why it does not apply. It is a static check — it
+cannot tell whether the script does what the user asked. Under a `%TEMP%` path the printed file name may come back in
+8.3 short form (`ADMINI~1`); the line numbers are still right.
 
 - **sctl is available** (`& $sctl status` shows ScriptCat connected, or `mcp__scriptcat__scripts_list` answers):
   install it into the user's ScriptCat and verify it in their browser, following

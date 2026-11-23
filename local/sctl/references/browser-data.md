@@ -4,8 +4,12 @@ Contents: [tabs, windows, groups](#tabs-windows-and-tab-groups) · [bookmarks, r
 [history, recent, downloads](#history-recently-closed-and-downloads) · [cookies, browsing data](#cookies-and-browsing-data) ·
 [extensions](#extensions) · [browser instances](#browser-instances)
 
-Every group takes `--browser <name|ID prefix>`. Read results with `-o json`. Lists default to `--limit 100`
-(1–1000).
+Every browser-data group takes `--browser <name|ID prefix>` **except `browsers` itself** (it is the command that
+lists instances, so `browsers --browser x` fails with `unknown flag: --browser`). Read results with `-o json`.
+
+`--limit` is not uniform: lists that accept it default to `100` and take 1–1000; **`recent list` is 25 (1–25)**;
+`tabs list`, `windows list`, `groups list` and `extensions list` take **no** `--limit` at all — they return
+everything.
 
 **Multi-item commands are all-or-nothing:** `tabs move/pin/mute/reload`, `windows close`, `bookmarks move` and
 the like change every item or none.

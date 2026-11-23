@@ -30,7 +30,9 @@ Copy-Item -Recurse -Force .\local\scriptcat-userscript   "$env:DSH_HOME\skills\s
 | `references/cdp.md` | `cdp send` / `cdp endpoint` 改 PowerShell，补 `$env:SCTL_CDP_HTTP` 取用与清理，点明 JSON 是 `.endpoint.httpUrl` 嵌套 |
 | `references/scriptcat.md` | 编辑流程改 PowerShell，补 `-f edits.json` 的用法与 `$` 插值提醒，补 `GM_log(message, level)` 顺序 |
 
-官方原版内容（权限模型、审批、破坏性命令、退出码、错误码表）一字未动。
+官方原版的技术事实（权限模型表、破坏性命令的 `--yes` 规则、退出码表本身）**未改动**；措辞层面已本地化的部分：
+`dev-loop.md` 的「每次写操作都等审批」标题改成「*可能*等审批」并补了 直接允许 的说明，`SKILL.md` 里
+`PAGE_UNRESPONSIVE` / `PAGE_NOT_AUTOMATABLE` 两行重写，`references/page.md` 补了 `page wait --text` 大小写敏感。
 
 ### scriptcat-userscript
 
@@ -62,11 +64,23 @@ Copy-Item -Recurse -Force .\upstream\sctl,.\upstream\scriptcat-userscript "$env:
 更新流程：把新的上游文件放进 `upstream/`，`git diff upstream local` 看差异，手工合并到 `local/`，
 再拷进 `$DSH_HOME/skills`。`upstream/SHA256SUMS.txt` 是拉取时的基线，用来确认 `upstream/` 没被误改。
 
-## 已经实测验证过的改动
+## 已实测验证过的改动
 
-- `$sctl` 绝对路径下 51 个 CLI 子命令可用；`ConvertFrom-Json).tabId`、`.tabs | Where-Object`、`.endpoint.httpUrl` 均验证。
-- `page eval '({…})'` 圆括号规则：不加括号报 `SyntaxError: Unexpected token ':'`，加括号正常。
-- `cdp send --params '{"…"}'` 单引号包 JSON：正常返回 Chrome 结果。
-- `-f edits.json` 走 PowerShell 写文件再编辑：锚点命中并生效（测试后已还原）。
-- 截图 `-f x.jpeg --format jpeg`：可正常读取；`-f x.png --format jpeg` 会被图像读取器拒收（本次实际踩到）。
-- `PAGE_UNRESPONSIVE` 用「关标签页重开」恢复：本次实际恢复成功。
+- `$sctl` 绝对路径下 CLI 子命令可用；`ConvertFrom-Json).tabId`、`.tabs | Where-Object`、`.endpoint.httpUrl` 均验证。
+- `page eval` 圆括号规则：**注意真实失败模式**——单键 `{a:1}` 不报错，而是被当成标签语句、静默只返回值（exit 0）；
+  多键才报 `SyntaxError: Unexpected token ':'`。
+- `cdp send --params '{"…"}'` 单引号包 JSON：正常返回 Chrome 结果；JSON 数组会被拒。
+- `-f edits.json`、`-f -`、`@path`、`@@` 的语义全部验证；用不匹配的 oldText 测试，两个脚本未被改动。
+- 截图：`--format` **默认 png 且与文件名无关**，两个方向都会错配（`.png`+jpeg / `.jpeg`+无 format）。
+- `PAGE_UNRESPONSIVE` 用「关标签页重开」恢复：实际恢复成功。
+- `PAGE_NOT_AUTOMATABLE`：扩展页与 `edge://` 不可自动化，实测。
+- **并发是硬约束**：4 个进程同时压 daemon 时扩展 4 分钟内重连 6 次，`get` 的退出码在 2/3 之间跳变。
+
+## 已知未验证 / 已知缺陷
+
+- `page upload` 在本机**完全不可用**：任何调用都返回 `INVALID_REQUEST: {"code":-32000,"message":"Not allowed"}`，
+  即使元素可见、文件可读。CDP `DOM.setFileInputFiles` 的替代路径**未验证**。
+- Playwright/Puppeteer 经 `cdp endpoint` 真实连接**未验证**（只验证了签发与关闭）。
+- `@require file:///` 的百分号编码路径（含空格/中文）能否被 ScriptCat 正确解码**未验证**。
+- 定时脚本（`@crontab`）真实触发**未验证**，只验证了 `run` 手动执行。
+- `sctl Browser` 0.4.0 与 `sctl` 0.4.1 版本不一致，目前正常。

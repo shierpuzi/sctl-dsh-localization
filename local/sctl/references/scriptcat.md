@@ -4,13 +4,23 @@ These commands go to the ScriptCat extension and take no `--browser`. With sever
 `sctl scriptcats`), pass `--scriptcat <name|ID prefix>` or set `SCTL_SCRIPTCAT`; without it `get` lists every instance
 (adding a `SCRIPTCAT` column) and the other commands fail with `SCRIPTCAT_AMBIGUOUS`.
 
-**The user approves in the browser** every write, and the first read of a script's source. The command blocks
-until they decide:
+**The user approves in the browser** every write, and the first read of a script's source — *unless* the外部接入
+card's policy is set to 直接允许, in which case they complete without a prompt (that is the setting on this machine;
+see the skill's DSH section). When approval is needed, the command blocks until they decide:
 
 - rejected → exit code 1;
 - voided or timed out → exit code 2.
 
 Tell the user a request is waiting in the browser. Retrying only stacks up more prompts.
+
+Two behaviours to expect either way:
+
+- Every write prints `waiting for approval in the browser…` **before** it validates anything, even under 直接允许 and
+  even for an edit that is then rejected for a non-matching `oldText`. As a progress line it means nothing; do not
+  send the user to the browser because of it.
+- The same failure can come back as exit 3 (`INVALID_REQUEST: edits[0].oldText not found in the script`) or as exit 2
+  (`operation voided or timed out`) depending on whether the extension was mid-reconnect. The exit-code table in the
+  skill describes the ordinary case; when a code looks inconsistent, check `status` before believing it.
 
 | Command | Notes |
 |---|---|

@@ -38,7 +38,7 @@ waits until it is actionable; on timeout the error names the last unmet conditio
 | `page press <key>` | Playwright key syntax: `Enter`, `Tab`, `Escape`, `Control+A`, `Shift+Tab`; `ControlOrMeta+A` selects all on any OS |
 | `page hover <ref>` | Moves the mouse to the element's center |
 | `page scroll <ref>` or `page scroll --dx N --dy N` | Scrolls the element into view, or wheels the viewport |
-| `page upload <ref> <file>...` | Sets the files of a file input, which may be hidden. Relative paths resolve against the current directory |
+| `page upload <ref> <file>...` | Sets the files of a file input, which may be hidden. Relative paths resolve against the current directory. **Broken on this install:** every attempt returns `INVALID_REQUEST: {"code":-32000,"message":"Not allowed"}` even for a visible, enabled `<input type=file>` with a readable file, with or without `--activate` or `--selector`. Do not retry it in a loop; if a file really must be uploaded, say so and fall back to the user doing it |
 
 ### Navigate and wait
 
@@ -46,7 +46,7 @@ waits until it is actionable; on timeout the error names the last unmet conditio
 |---|---|
 | `page goto <url> [--wait load\|domcontentloaded\|networkidle]` | Navigates and waits for the load state. HTTP 404/500 are reported, not failures; network errors fail with `NAVIGATION_FAILED` |
 | `page back` / `page forward` / `page reload` | Same `--wait`. With no history entry to go to, `NOT_FOUND` |
-| `page wait --text T \| --gone T \| --selector S \| --selector-gone S \| --url P \| --load STATE` | Exactly one condition per call; default timeout 10s |
+| `page wait --text T \| --gone T \| --selector S \| --selector-gone S \| --url P \| --load STATE` | Exactly one condition per call; default timeout 10s. `--text` matches **case-sensitively** and only against *visible* text, so a document title or differently-cased copy silently burns the timeout and exits 3 |
 
 After an action that changes the page, wait for the visible result (`page wait --text …`) rather than sleeping.
 
