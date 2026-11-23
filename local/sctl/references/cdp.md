@@ -36,22 +36,27 @@ Reach for it only when no `page` or `debug` command does the job.
 ## Endpoint for Playwright and Puppeteer
 
 ```powershell
-& $sctl cdp endpoint            # create or show: both addresses, client state, expiry
-& $sctl cdp endpoint -o json    # read .endpoint.httpUrl and .endpoint.wsUrl (the JSON is nested, not top level)
-& $sctl cdp status              # show it, or say there is none
+& $sctl cdp endpoint -o json    # only ever with -o json; read .endpoint.clientConnected / .expiresAt
+& $sctl cdp status -o json      # same rule — the plain form prints both addresses
 & $sctl cdp close               # expire it now and disconnect the client; fine when there is none
 ```
 
-In PowerShell, keep the address in an environment variable rather than a file, and only for the child process:
+**Naming an endpoint is itself the secret.** The address carries a random token in its path, and whoever holds it
+gets unapproved, full control of every attachable tab: reading pages and cookies, running scripts, sending requests
+as the signed-in user. So `cdp status` and `cdp endpoint` without `-o json` print a credential — never run them to
+answer "is a client connected?", and never echo `httpUrl`/`wsUrl` into a transcript, report or commit.
+
+Keep it in an environment variable, and keep **all of these lines in one shell call** — each tool call is a fresh
+PowerShell, so a variable set in one call is gone in the next:
 
 ```powershell
-$env:SCTL_CDP_HTTP = (& $sctl cdp endpoint -o json | ConvertFrom-Json).endpoint.httpUrl
-node .\drive.mjs        # reads process.env.SCTL_CDP_HTTP
-Remove-Item Env:SCTL_CDP_HTTP
+$ep = (& $sctl cdp endpoint -o json | ConvertFrom-Json).endpoint
+$env:SCTL_CDP_HTTP = $ep.httpUrl
+$env:SCTL_CDP_WS   = $ep.wsUrl
+node .\drive.mjs                      # reads process.env.SCTL_CDP_HTTP / SCTL_CDP_WS
+Remove-Item Env:SCTL_CDP_HTTP, Env:SCTL_CDP_WS
 & $sctl cdp close
 ```
-
-Print no part of the address into a transcript, a report, or a commit: the secret in the path is the password.
 
 **The address is a password.** It carries a random secret, and whoever has it gets unapproved, full control of
 every tab Chrome lets a debugger attach to in that browser: reading pages and cookies, running scripts, sending

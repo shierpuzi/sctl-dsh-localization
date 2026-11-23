@@ -34,9 +34,10 @@ it re-handshake, after which everything fails with `extension not connected`.
 ```
 
 With several ScriptCat instances online, `install`, `edit`, `grep`, `enable`, `disable`, `delete` (and `run` /
-`logs` where they exist) fail with `SCRIPTCAT_AMBIGUOUS` (exit 3) until you pass `--scriptcat <name>` or set the
-`SCTL_SCRIPTCAT` environment variable (`$env:SCTL_SCRIPTCAT = 'edge-ac4b'`). Set it once for the session so every
-command below goes to the same instance. `get` does not fail but lists scripts from every online instance.
+`logs` where they exist) fail with `SCRIPTCAT_AMBIGUOUS` (exit 3) until you pass `--scriptcat <name>`. Prefer the
+explicit flag: it works in every call. `$env:SCTL_SCRIPTCAT = 'edge-ac4b'` works too but **only within the same shell
+call**, because each call is a fresh process — set it again in every call or you get the ambiguity back. `get` does
+not fail but lists scripts from every online instance.
 
 ScriptCat not connected: the user enables external access in ScriptCat and pairs it with a code from `sctl connect`.
 No browser online: page checks are unavailable; you can still install, and the user verifies by hand. Do not start
@@ -103,6 +104,13 @@ values kept. Changing either one installs a separate script instead, so keep the
 update is rejected (script type mismatch) if it turns a page script into a background or scheduled script, or the
 reverse.
 
+**Make the uuid an assertion, not a remark.** Record the uuid from the first install and compare it after *every*
+later `install`: a different uuid means you silently created a **second** script — both enabled, both matching the
+same pages, each firing its own DOM mutations and requests. That is the one failure mode 直接允许 cannot catch for
+you, because no approval page appears. If it happens: `delete` the spare and put the original `@name`/`@namespace`
+back. A reformat such as adding a trailing slash or switching to the `https://` form is enough to trigger it, and
+`check.mjs` does not flag a *changed* namespace, only a missing one.
+
 ## Applying a change
 
 Edit the local file first — it stays the source of truth — then push it to the installed copy. Either:
@@ -134,9 +142,9 @@ show up on the approval page as a permission change. Bump `@version` with each c
 
 ## Faster iteration: run the code from a local file
 
-Every reinstall or `sctl edit` waits for an approval. For a page script you can approve once and then iterate on a
-local file: install a **stub** — the script's header plus one extra line, `@require file:///<absolute path>` to
-the file you are editing, and an empty body.
+Every reinstall or `edit` normally waits for an approval; under 直接允许 it completes at once. For a page script you
+can approve once and then iterate on a local file: install a **stub** — the script's header plus one extra line,
+`@require file:///<absolute path>` to the file you are editing, and an empty body.
 
 ```js
 // ==UserScript==
@@ -154,8 +162,10 @@ Generate the stub instead of writing it by hand — it copies the header and any
 settings form is built from the installed code) and appends the `@require` with the absolute path:
 
 ```powershell
-& $env:DSH_NODE_EXECUTABLE scripts/stub.mjs my-script.user.js -o my-script.stub.user.js   # scripts/ of this skill
-& $sctl install ./my-script.stub.user.js -o json
+# absolute path to the generator; the input script also resolves against the CURRENT directory
+& $env:DSH_NODE_EXECUTABLE "$env:DSH_HOME\skills\scriptcat-userscript\scripts\stub.mjs" `
+    D:\work\my-script.user.js -o D:\work\my-script.stub.user.js
+& $sctl install D:\work\my-script.stub.user.js -o json
 ```
 
 The `@require` path must be a Windows path in `file:///` form — `file:///D:/work/my-script.user.js` (forward
@@ -313,9 +323,12 @@ These bit during the first end-to-end run on this installation; check them befor
    directions: `-f x.png --format jpeg` writes JPEG bytes under a `.png` name, and `-f x.jpeg` without `--format`
    writes PNG under a `.jpeg` name. Always pass both. Large full-page PNGs also exceed the 4 MiB frame limit — use
    `--quality 60-70` and the viewport.
-5. **`raw.githubusercontent.com` times out on this network** while `api.github.com` and release downloads work.
-   Fetch upstream files through the contents API (base64) rather than `raw`, and do not pipe the Windows install
-   script from `raw.githubusercontent.com`.
+5. **Network access to scriptscat/GitHub is flaky in both directions — do not conclude a host is dead.** Two
+   independent measurements in the same session disagreed: one saw `raw.githubusercontent.com` succeed 4/4 while
+   `docs.scriptcat.org/docs/dev/` timed out twice; the other saw `raw` fail 1 of 3 (one attempt taking 13 s) while
+   `docs.scriptcat.org/docs/dev/` succeeded 3/3. So: retry a slow fetch once with a generous timeout before deciding
+   it is unreachable, and prefer the higher-authority source (`scriptcat.d.ts` over the dev docs) rather than
+   switching source because of one timeout.
 6. **Extension pages cannot be automated.** `chrome-extension://` and `edge://` pages return
    `PAGE_NOT_AUTOMATABLE`, so ScriptCat's dashboard, the sctl Browser popup and `edge://extensions` — pairing codes,
    policy switches, "Allow access to file URLs" — are always the user's clicks.

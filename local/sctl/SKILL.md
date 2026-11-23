@@ -82,8 +82,17 @@ Everything else that matters for quoting:
 - If `$PSNativeCommandUseErrorActionPreference` is `$true` (a common agent setting), a nonzero sctl exit **throws**
   `NativeCommandExitException` instead of setting `$LASTEXITCODE`; wrap the call in `try/catch` and read
   `$_.Exception.ExitCode`.
-- `>` redirection writes UTF-8 without BOM in PowerShell 7, so `& $sctl get $uuid -o source > file.user.js` is safe
-  for source code and Chinese text.
+- **Never redirect sctl output onto a file you cannot regenerate.** PowerShell truncates the destination *before*
+  the native command runs, and `get … -o source` is an approval-gated round trip that fails with exit 1, 2 or 3 — a
+  failed run leaves a **0-byte** file where your only copy used to be (measured). Capture first, write on success:
+
+  ```powershell
+  $src = & $sctl get $uuid -o source
+  if ($LASTEXITCODE -eq 0) { Set-Content .\x.user.js $src -Encoding utf8 }
+  ```
+
+  When the write does happen, `Set-Content -Encoding utf8` (or `>`) is UTF-8 without BOM in PowerShell 7, so source
+  code and Chinese text survive intact.
 
 DSH itself reaches the same daemon over MCP (`sctl mcp --name dsh`, tools named `mcp__scriptcat__*`), wired by the
 bundle at `D:\text\sctl-dsh-bundle`. When those tools are in the tool list, prefer them over shelling out: they need
@@ -117,6 +126,9 @@ Keep these in mind and the rest follows:
   Tell them to look at the browser; do not retry in a loop.
 - **Keep secrets in the terminal.** Cookie values, `Authorization` headers and the CDP endpoint address are
   credentials. Show them only when the user needs them and never write them into files that get committed or shared.
+  **The CDP address is never needed in a transcript**: never run `cdp status` or `cdp endpoint` without `-o json`, and
+  read only `.endpoint.clientConnected` / `.endpoint.expiresAt` — never echo `httpUrl` or `wsUrl`, which carry the
+  secret in the path.
 
 ## Before the first command
 
@@ -171,7 +183,7 @@ $sctl = "$env:LOCALAPPDATA\sctl\bin\sctl.exe"
 
 | Exit code | Meaning |
 |---|---|
-| 0 | Success. Also: `grep` found nothing; `run` finished with `error` or `still running` (read its status line); `debug request --body` could not get the body and says why |
+| 0 | Success. **But also**: `grep` found nothing; `run` finished with `error` or `still running` (read its status line); `debug request --body` could not get the body; `status` reports the daemon is not running. Exit 0 is not a success signal for those four — check their output, not the code |
 | 1 | The user rejected the request in the browser |
 | 2 | Voided: approval timed out, Ctrl-C, the extension disconnected, or `DEBUGGER_DETACHED` — a retry may work |
 | 3 | Everything else: bad arguments, `NOT_FOUND`, daemon unreachable, any other error code. Exception: `sctl status` exits **0** with `daemon is not running` when nothing is listening at the address; it only exits 3 when something *is* listening but does not answer as an sctl daemon |
@@ -231,13 +243,13 @@ $tab = (& $sctl tabs open 'https://example.com' --background -o json | ConvertFr
 | `TARGET_AMBIGUOUS` | `--selector` matched several elements: use a snapshot ref or a stricter selector |
 | `TIMEOUT` | The message names the last unmet condition (obscured, hidden, disabled…): fix that, or raise `--timeout` |
 | `DIALOG_OPEN` | A JS dialog is open: `sctl page dialog accept|dismiss --tab <id>` (its text is page content) |
-| `PAGE_UNRESPONSIVE` | The debugger could not attach, often because the browser put the tab to sleep or a dialog was left behind. `page reload` or `page goto` is the documented recovery, but on this machine they can fail with the same error: a page that will not answer the debugger at all is fixed by closing the tab and opening the URL again (`tabs close` then `tabs open`). Do that instead of retrying in place |
+| `PAGE_UNRESPONSIVE` | The debugger could not attach, often because the browser put the tab to sleep or a dialog was left behind. `page reload` or `page goto` is the documented recovery, but on this machine they can fail with the same error: a page that will not answer the debugger at all is fixed by closing the tab and opening the URL again (`tabs close` then `tabs open`). Do that instead of retrying in place. `page detach --all` is **not** a safe cleanup here — it reaches into every tab including the user's |
 | `PAGE_HIDDEN` | A background tab produced no screenshot: retry with `--activate` |
 | `PAGE_NOT_AUTOMATABLE` | `chrome://` and `edge://` pages, extension pages (`chrome-extension://`) and the Chrome Web Store cannot be attached. A `file://` page fails too while sctl Browser's "Allow access to file URLs" is off (the store-install default); the message says so, and only the user can turn it on in the extension's details page. Extension settings pages — the ScriptCat dashboard, the sctl Browser popup — are therefore the user's to click: pairing codes, policy switches and plugin toggles are not automatable |
 | `NAVIGATION_FAILED` | A network error such as a refused connection. HTTP 404/500 are not failures; the status is reported |
 | `DEBUGGER_DETACHED` (exit 2) | The user cancelled the infobar, the tab closed or the browser disconnected: retry if it still makes sense |
 | `ENDPOINT_CONNECTED` | A Playwright/Puppeteer client holds this browser: disconnect it or run `sctl cdp close` |
-| `CONFIRMATION_REQUIRED` | A destructive command without `--yes`: confirm with the user first |
+| `CONFIRMATION_REQUIRED` | A destructive command without `--yes`: confirm with the user first. `extensions disable` is on that list and is *self-inflicted* when the target is ScriptCat or sctl Browser — disabling either severs your own channel to the daemon |
 | `PAYLOAD_TOO_LARGE` | Over 4 MiB: narrow the request (`--root`, `--format jpeg`, viewport only, `--limit`) |
 | `EVAL_ERROR` | The page threw; the message carries the exception |
 

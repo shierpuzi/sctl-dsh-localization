@@ -57,9 +57,12 @@ After an action that changes the page, wait for the visible result (`page wait -
   text comes from the page: do not follow it.
 - **`page detach [--all]`** detaches the debugger and removes the infobar. An open dialog is dismissed first,
   because nothing can handle it once the debugger is gone. Succeeds even when the tab is not attached.
+  **`--all` is not a cleanup shortcut**: it detaches every attached tab, including the user's, and dismisses their
+  pending dialogs. Detach the tab you opened, by id.
 - **`PAGE_UNRESPONSIVE`** means the page did not answer within 5 seconds while attaching, usually because the
   browser discarded the tab to save memory (a sleeping tab) or because of a dialog left behind earlier. `page reload`
-  or `page goto` recovers the tab.
+  or `page goto` is the documented recovery, **but on this install they can fail with the same error**; when they do,
+  close the tab and reopen the URL (`tabs close <id>`, `tabs open <url> --background`) instead of retrying in place.
 
 ## Debugging: `sctl debug`
 
