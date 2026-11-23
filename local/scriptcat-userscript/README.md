@@ -45,7 +45,7 @@ ln -s "$(pwd)/skills/scriptcat-userscript" ~/.codex/skills/scriptcat-userscript
 `<root>/<name>/SKILL.md`，落盘即热加载，不用重启），所以直接拷目录即可：
 
 ```powershell
-Copy-Item -Recurse -Force D:\text\sctl-skills\local\scriptcat-userscript "$env:DSH_HOME\skills\scriptcat-userscript"
+Copy-Item -Recurse -Force <repo>\local\scriptcat-userscript "$env:DSH_HOME\skills\scriptcat-userscript"
 ```
 
 **本目录已经本地化过**，与上游的差异：
@@ -58,7 +58,7 @@ Copy-Item -Recurse -Force D:\text\sctl-skills\local\scriptcat-userscript "$env:D
 | `references/background.md` | `GM_log` 顺序的告警 |
 
 **不要**用 `npx skills update` 覆盖它——那会把本地化改回上游。更新上游内容时按
-`D:\text\sctl-skills\` 的 `upstream/` 对照手工合并。
+本仓库的 `upstream/` 对照手工合并。
 
 ## 已知限制
 

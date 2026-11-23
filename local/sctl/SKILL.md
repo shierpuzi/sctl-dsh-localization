@@ -95,7 +95,8 @@ Everything else that matters for quoting:
   code and Chinese text survive intact.
 
 DSH itself reaches the same daemon over MCP (`sctl mcp --name dsh`, tools named `mcp__scriptcat__*`), wired by the
-bundle at `D:\text\sctl-dsh-bundle`. When those tools are in the tool list, prefer them over shelling out: they need
+bundle that wires `sctl mcp --name dsh` in as a stdio MCP server. When those tools are in the tool list, prefer them
+over shelling out: they need
 no PATH, no quoting and no exit-code bookkeeping. Keep the CLI path for `connect`, `service`, `version`, for anything
 else MCP does not expose, and for output that is easier to script.
 
@@ -304,7 +305,7 @@ re-handshook mid-call — retry once, and check `security` in `sctl status -o js
 | Background service | Task Scheduler task `\sctl`, started at logon; `& $sctl service status` |
 | Data directory | `%LOCALAPPDATA%\sctl\` — holds `control.token`, `scriptcats.json`, `browsers.json`, `logs\sctl.log` |
 | Daemon address | `ws://127.0.0.1:8643` (loopback only) |
-| DSH MCP bundle | `D:\text\sctl-dsh-bundle` (a link under the profile's `node_modules`) |
+| DSH MCP bundle | a local bundle package linked into the profile's `node_modules`; it runs `sctl mcp --name dsh` over stdio |
 
 The data directory is credentials — pairing keys and the control token. Never print its contents, copy it into the
 workspace, or commit it.

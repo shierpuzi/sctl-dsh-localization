@@ -35,7 +35,7 @@ it re-handshake, after which everything fails with `extension not connected`.
 
 With several ScriptCat instances online, `install`, `edit`, `grep`, `enable`, `disable`, `delete` (and `run` /
 `logs` where they exist) fail with `SCRIPTCAT_AMBIGUOUS` (exit 3) until you pass `--scriptcat <name>`. Prefer the
-explicit flag: it works in every call. `$env:SCTL_SCRIPTCAT = 'edge-ac4b'` works too but **only within the same shell
+explicit flag: it works in every call. `$env:SCTL_SCRIPTCAT = '<instance-name>'` works too but **only within the same shell
 call**, because each call is a fresh process — set it again in every call or you get the ambiguity back. `get` does
 not fail but lists scripts from every online instance.
 
