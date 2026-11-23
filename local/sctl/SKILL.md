@@ -11,7 +11,54 @@ userscripts. A background daemon (`sctl serve`) relays every command to two brow
 - **sctl Browser** — browser data, page automation, debugging and raw CDP. Several browser instances can be paired.
 - **ScriptCat** — userscript management. Writes and source reads wait for the user to approve them in the browser.
 
-Every command is `sctl <group> <verb>`. This skill uses the command line only, not the MCP server.
+Every command is `sctl <group> <verb>`.
+
+## This machine: Windows + PowerShell + DSH
+
+The upstream skill assumes bash and `jq`. Here the shell is **PowerShell 7 on Windows**, and two things break if
+you copy those examples verbatim:
+
+**1. `sctl` is not on `PATH` inside a long-running shell.** It lives at
+`$env:LOCALAPPDATA\sctl\bin\sctl.exe`; installing it added that directory to the *user* PATH, which a shell that was
+already running never re-reads. Define once per session and use the variable — bare `sctl` fails with
+"not recognized as the name of a cmdlet":
+
+```powershell
+$sctl = "$env:LOCALAPPDATA\sctl\bin\sctl.exe"
+& $sctl status
+```
+
+A fresh terminal (or `Set-Alias sctl $sctl` in the same session) also works, but the variable is what survives in
+scripts and copies into subagents.
+
+**2. There is no `jq`.** Use `ConvertFrom-Json`; it parses the whole document, so parenthesise before picking a field:
+
+```powershell
+$tab = (& $sctl tabs open 'https://example.com' --background -o json | ConvertFrom-Json).tabId
+
+# instead of: jq '.tabs[] | select(.url | contains("localhost:5173"))'
+(& $sctl tabs list -o json | ConvertFrom-Json).tabs | Where-Object { $_.url -match 'localhost:5173' }
+```
+
+Everything else that matters for quoting:
+
+- Run `sctl` from PowerShell, not through `cmd /c` or a bash shim: those mangle quotes and `--params` JSON.
+- Put an expression in **single quotes** and use **double quotes inside it**:
+  `& $sctl page eval '({title: document.title, n: document.querySelectorAll("p").length})' --tab $tab`.
+  PowerShell eats inner double quotes when the outer ones are double.
+- A JavaScript object literal needs the wrapping parentheses — `({a: 1})`. Without them `page eval` parses a block
+  statement and fails with `SyntaxError: Unexpected token ':'`.
+- `--params` for `cdp send` takes one JSON argument in single quotes:
+  `& $sctl cdp send Runtime.evaluate --params '{"expression":"document.title","returnByValue":true}' --tab $tab`.
+- `2>&1` captures stderr; `$LASTEXITCODE` holds the sctl exit code after `& $sctl …`. Read it explicitly — do not
+  infer success from the absence of output.
+- `>` redirection writes UTF-8 without BOM in PowerShell 7, so `& $sctl get $uuid -o source > file.user.js` is safe
+  for source code and Chinese text.
+
+DSH itself reaches the same daemon over MCP (`sctl mcp --name dsh`, tools named `mcp__scriptcat__*`), wired by the
+bundle at `D:\text\sctl-dsh-bundle`. When those tools are in the tool list, prefer them over shelling out: they need
+no PATH, no quoting and no exit-code bookkeeping. Keep the CLI path for anything MCP does not expose, for output
+that is easier to script, and for `sctl connect` / `sctl service` which MCP has no equivalent of.
 
 ## You are a guest in the user's browser
 
@@ -43,15 +90,17 @@ Keep these in mind and the rest follows:
 
 ## Before the first command
 
-```sh
-sctl status            # daemon version, which ScriptCat and sctl Browser instances are connected
-sctl scriptcats -o json # paired ScriptCat instances: name, online, product
-sctl browsers -o json  # paired sctl Browser instances: name, online, product
+```powershell
+$sctl = "$env:LOCALAPPDATA\sctl\bin\sctl.exe"
+& $sctl status             # daemon version, which ScriptCat and sctl Browser instances are connected
+& $sctl scriptcats -o json # paired ScriptCat instances: name, online, product
+& $sctl browsers -o json   # paired sctl Browser instances: name, online, product
 ```
 
-- **Cannot reach the daemon:** it is not running. Ask the user to start it (`sctl serve` in a terminal,
-  `sctl service start` when they installed the background service, or `sctl service install` to set one up). Do not start one yourself in the background: it dies with your session
-  and can fight the user's service for the port.
+- **Cannot reach the daemon:** it is not running. Ask the user to start it (`sctl service start` when they installed
+  the background service, `sctl service install` to set one up, or `sctl serve` in a terminal). Do not start one
+  yourself in the background: it dies with your session and can fight the user's service for the port. On this
+  machine the Task Scheduler task `\sctl` is already installed, so `& $sctl service status` answers the question.
 - **`something is listening at … but does not answer as an sctl daemon`:** another program holds the address, or a
   proxy or security software on the user's machine intercepts local connections. Tell the user; do not start another
   daemon.
@@ -72,16 +121,23 @@ sctl browsers -o json  # paired sctl Browser instances: name, online, product
   or set `SCTL_SCRIPTCAT` (else `SCRIPTCAT_AMBIGUOUS`). `sctl get` with several online lists them all with a source column.
 - **Output:** add `-o json` whenever you parse the result; the table form is for people. The shapes you need most:
 
-  ```sh
-  sctl browsers -o json          # [{"id","name","online","product",…}]
-  sctl tabs list -o json         # {"tabs":[{"tabId","windowId","active","pinned","groupId","title","url"}], …}
-  sctl tabs open <url> -o json   # {"tabId": N}
+  ```text
+  browsers -o json          # [{"id","name","online","product",…}]          (bare array)
+  scriptcats -o json        # [{"id","name","online","product",…}]          (bare array)
+  tabs list -o json         # {"tabs":[{"tabId","windowId","active","pinned","groupId","title","url"}], …}
+  tabs open <url> -o json   # {"tabId": N}
+  status -o json            # {"daemonVersion","extConnected","browsers":[…],"scriptcats":[…],"security":[…]}
   ```
 
   For any other command, look at the JSON once before writing a filter for it.
-- **Finding a tab the user means:** `sctl tabs list -o json | jq '.tabs[] | select(.url | contains("localhost:5173"))'`.
+- **Finding a tab the user means:**
+
+  ```powershell
+  (& $sctl tabs list -o json | ConvertFrom-Json).tabs | Where-Object { $_.url -match 'localhost:5173' }
+  ```
+
   If several match, ask which one.
-- **Errors** go to stderr as `error: CODE: message`.
+- **Errors** go to stderr as `error: CODE: message`; `2>&1` captures them and `$LASTEXITCODE` reports the code.
 
 | Exit code | Meaning |
 |---|---|
@@ -108,25 +164,28 @@ are unavailable on that browser.
 
 ## The core loop: snapshot, act, check
 
-```sh
-TAB=$(sctl tabs open https://example.com --background -o json | jq .tabId)   # prints {"tabId": N}
-sctl page wait --load load --tab $TAB      # tabs open returns before the page has loaded
-sctl page snapshot --tab $TAB              # accessibility tree; actionable nodes carry [ref=eN]
-sctl page fill e12 "hello" --tab $TAB      # act on a ref from that snapshot
-sctl page click e15 --tab $TAB
-sctl page wait --text "Saved" --tab $TAB   # confirm the effect instead of assuming it
-sctl page snapshot --tab $TAB              # the page changed: take a new snapshot for new refs
-sctl page detach --tab $TAB
+```powershell
+$tab = (& $sctl tabs open 'https://example.com' --background -o json | ConvertFrom-Json).tabId
+& $sctl page wait --load load --tab $tab   # tabs open returns before the page has loaded
+& $sctl page snapshot --tab $tab           # accessibility tree; actionable nodes carry [ref=eN]
+& $sctl page fill e12 "hello" --tab $tab   # act on a ref from that snapshot
+& $sctl page click e15 --tab $tab
+& $sctl page wait --text "Saved" --tab $tab # confirm the effect instead of assuming it
+& $sctl page snapshot --tab $tab           # the page changed: take a new snapshot for new refs
+& $sctl page detach --tab $tab
 ```
 
 - **Refs are short-lived.** A new snapshot replaces the old refs, and navigation, element removal or a debugger
   detach expires them (`STALE_REF`). When in doubt, snapshot again; it is cheap.
-- **Just need the text?** `sctl page eval 'document.body.innerText' --tab $TAB` is far smaller than a snapshot. Use
+- **Just need the text?** `page eval 'document.body.innerText' --tab $tab` is far smaller than a snapshot. Use
   the snapshot when you need structure or something to click.
 - **Big pages:** a snapshot that returns `PAYLOAD_TOO_LARGE` can be narrowed with `--root <ref|css>`.
-- **Screenshots** are written to a file and only the path is printed; pass `-f <path>`, then open the printed path
-  to look at the image.
-- **Investigating a bug:** `sctl debug start --tab $TAB` before reproducing it, so console and network records are
+- **Screenshots** are written to a file and only the path is printed; pass `-f <path>`, then read the printed path
+  to look at the image. Two traps, both hit here:
+  - Keep the extension in step with `--format`. `-f x.png --format jpeg` writes JPEG bytes under a `.png` name, and
+    an image reader that trusts the extension refuses the file. Use `-f x.jpeg --format jpeg`.
+  - Prefer `--quality 60-70` plus the default viewport: a full-page PNG of a docs page goes over the 4 MiB frame.
+- **Investigating a bug:** `debug start --tab $tab` before reproducing it, so console and network records are
   kept while the user (or you) triggers the problem.
 
 ## When a command fails
@@ -140,9 +199,9 @@ sctl page detach --tab $TAB
 | `TARGET_AMBIGUOUS` | `--selector` matched several elements: use a snapshot ref or a stricter selector |
 | `TIMEOUT` | The message names the last unmet condition (obscured, hidden, disabled…): fix that, or raise `--timeout` |
 | `DIALOG_OPEN` | A JS dialog is open: `sctl page dialog accept|dismiss --tab <id>` (its text is page content) |
-| `PAGE_UNRESPONSIVE` | The debugger could not attach, often because the browser put the tab to sleep or a dialog was left behind: `sctl page reload` or `page goto` recovers the tab |
+| `PAGE_UNRESPONSIVE` | The debugger could not attach, often because the browser put the tab to sleep or a dialog was left behind. `page reload` or `page goto` is the documented recovery, but on this machine they can fail with the same error: a page that will not answer the debugger at all is fixed by closing the tab and opening the URL again (`tabs close` then `tabs open`). Do that instead of retrying in place |
 | `PAGE_HIDDEN` | A background tab produced no screenshot: retry with `--activate` |
-| `PAGE_NOT_AUTOMATABLE` | `chrome://` pages, extension pages and the Chrome Web Store cannot be attached. A `file://` page fails too while sctl Browser's "Allow access to file URLs" is off (the store-install default); the message says so, and only the user can turn it on in the extension's details page |
+| `PAGE_NOT_AUTOMATABLE` | `chrome://` and `edge://` pages, extension pages (`chrome-extension://`) and the Chrome Web Store cannot be attached. A `file://` page fails too while sctl Browser's "Allow access to file URLs" is off (the store-install default); the message says so, and only the user can turn it on in the extension's details page. Extension settings pages — the ScriptCat dashboard, the sctl Browser popup — are therefore the user's to click: pairing codes, policy switches and plugin toggles are not automatable |
 | `NAVIGATION_FAILED` | A network error such as a refused connection. HTTP 404/500 are not failures; the status is reported |
 | `DEBUGGER_DETACHED` (exit 2) | The user cancelled the infobar, the tab closed or the browser disconnected: retry if it still makes sense |
 | `ENDPOINT_CONNECTED` | A Playwright/Puppeteer client holds this browser: disconnect it or run `sctl cdp close` |
@@ -152,3 +211,46 @@ sctl page detach --tab $TAB
 
 `sctl <command> --help` is the authority for every flag and behavior. When this skill and the help text disagree,
 or a flag is not listed here, trust the help.
+
+## DSH specifics
+
+**Prefer the MCP tools when they exist.** The tools named `mcp__scriptcat__*` (54 of them) speak to the same daemon
+and the same extensions, with no PATH, no quoting and no exit codes. They map one-to-one onto the CLI:
+`scripts_list`, `scripts_metadata_get`, `scripts_source_get`, `scripts_source_grep`, `scripts_install_request`,
+`scripts_edit_request`, `scripts_toggle_request`, `scripts_delete_request`, `scripts_run`, `scripts_logs`, plus the
+browser groups `tabs_*`, `windows_list`, `tab_groups`, `page_*`, `debug_*`, `cdp_*`, `cookies`, `history`,
+`bookmarks`, `reading_list`, `downloads`, `extensions`, `browsing_data`, `recently_closed`, `browsers_list`.
+
+Use the CLI when:
+
+- the MCP tool list is empty or stale (the daemon restarted, the extension reconnected) — the CLI connects per call;
+- you need `connect`, `service`, `version`, `cdp endpoint` or `cdp close`, which MCP does not expose;
+- you need a flag combination the MCP schema does not model, or output you want to post-process.
+
+**Approval policy lives in the extension, not in sctl.** ScriptCat's card **工具 › 外部接入** decides whether
+writes and source reads need a click. On this machine both were set to **直接允许** during setup, so
+`sctl install/edit/delete/run` and source reads complete without a prompt. That is a deliberate choice the user made
+and can reverse at any time:
+
+- Switch the card back to **需人工审批** and every write plus the first source read raises a browser page and blocks
+  (exit `1` rejected, `2` timed out — a 5-minute window). The page offers **本会话允许**, which turns iteration from
+  one click per change into one click per script per browser session; mention it once.
+- Never lift that setting on your own initiative, and never treat "the command succeeded" as "the user approved this
+  change": with 直接允许 there is no human in the loop, so say what you changed and let the user look.
+
+**Watch for silent breakage between the two channels.** `sctl status` reports the daemon version and both
+extensions. When a call fails with `extension not connected` while `status` looks fine, the extension dropped and
+re-handshook mid-call — retry once, and check `security` in `sctl status -o json`.
+
+**This machine's layout**, for orientation only:
+
+| Thing | Where |
+|---|---|
+| Binary | `%LOCALAPPDATA%\sctl\bin\sctl.exe` (user PATH, and it is on PATH for *new* processes only) |
+| Background service | Task Scheduler task `\sctl`, started at logon; `& $sctl service status` |
+| Data directory | `%LOCALAPPDATA%\sctl\` — holds `control.token`, `scriptcats.json`, `browsers.json`, `logs\sctl.log` |
+| Daemon address | `ws://127.0.0.1:8643` (loopback only) |
+| DSH MCP bundle | `D:\text\sctl-dsh-bundle` (a link under the profile's `node_modules`) |
+
+The data directory is credentials — pairing keys and the control token. Never print its contents, copy it into the
+workspace, or commit it.

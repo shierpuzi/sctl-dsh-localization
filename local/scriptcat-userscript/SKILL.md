@@ -14,6 +14,40 @@ carries over; the differences below are the ones that break scripts.
 <https://github.com/scriptscat/scriptcat/tree/main/example>. The developer docs at <https://docs.scriptcat.org/docs/dev/>
 can lag behind the types; when they disagree, trust the types.
 
+## 0. This machine: Windows + PowerShell + DSH
+
+The upstream copy of this skill assumes bash and `jq`. Here everything runs in **PowerShell 7 on Windows** inside
+DSH. What that changes:
+
+- **`sctl` is not on `PATH`.** It is at `$env:LOCALAPPDATA\sctl\bin\sctl.exe`; the installer added that directory to
+  the *user* PATH, which a shell that was already running never re-reads. Set it once per session:
+
+  ```powershell
+  $sctl = "$env:LOCALAPPDATA\sctl\bin\sctl.exe"
+  & $sctl status      # "extension connected: true" means the ScriptCat side is usable
+  ```
+
+- **No `jq`.** Use `ConvertFrom-Json`, and parenthesise before picking a field:
+
+  ```powershell
+  & $sctl get <uuid> -o json | ConvertFrom-Json | Select-Object name, version, type, grants
+  ```
+
+- **Prefer the MCP tools when they are in the tool list.** `mcp__scriptcat__*` reaches the same daemon with no PATH,
+  quoting or exit codes: `scripts_list`, `scripts_metadata_get`, `scripts_source_get`, `scripts_source_grep`,
+  `scripts_install_request`, `scripts_edit_request`, `scripts_toggle_request`, `scripts_delete_request`,
+  `scripts_run`, `scripts_logs`. The browser half (`page_*`, `debug_*`, `tabs_*`) is there too, which is what the
+  verification loop in [references/dev-loop.md](references/dev-loop.md) needs. Fall back to the CLI for `connect`,
+  `service`, or a flag the MCP schema does not model.
+- **Approval is decided in the extension card** **工具 › 外部接入** of ScriptCat, not in sctl. On this machine both
+  write and source-read policies were set to **直接允许**, so installs and edits land without a click. Do not change
+  that setting, and do not assume a silent success means a human reviewed it: state what changed.
+- **Node for `scripts/check.mjs`** is the DSH runtime: `& $env:DSH_NODE_EXECUTABLE scripts/check.mjs <file>`, or plain
+  `node` if it is on PATH in that shell.
+
+The sctl skill carries the full Windows/DSH notes (quoting rules, `page eval`, screenshot formats); read it too when
+the verification loop shows something odd.
+
 ## 1. Pick the script type
 
 | The script must… | Type | Key metadata |
@@ -149,6 +183,11 @@ is legal there.
   a background script's output shows up — ScriptCat's Logs page (filter by the script's `name` or `uuid`), or
   `sctl logs`. The script list shows only the run status (running / error / stopped) and a scheduled script's
   next run time. Release builds do not store `debug`, so log anything someone must read at `info` or above.
+  **The argument order is `(message, level)`, not Tampermonkey's `(level, message)`.** Written backwards, the call
+  is silently dropped: the level string becomes the message and the real message is discarded as an invalid level,
+  so `sctl logs` shows nothing but "exec script complete". If a background script logs nothing, check this first.
+  Verified on ScriptCat 1.5.2: `GM_log("done", "warn")` records at `warn`; `sctl logs <uuid> --level warn` keeps
+  it, and the log component is reported as `GM_log`, which makes a good `--text` filter.
 
 **User configuration**
 
@@ -172,8 +211,8 @@ Writing the file is half the job; the other half is seeing it run.
 First run the static check bundled with this skill (Node 18+, no dependencies; paths are relative to this
 skill's directory):
 
-```sh
-node scripts/check.mjs my-script.user.js   # exit 1 = errors that will break the script at runtime
+```powershell
+& $env:DSH_NODE_EXECUTABLE scripts/check.mjs my-script.user.js   # exit 1 = errors that will break the runtime
 ```
 
 It reports `error|warn <rule> <file>:<line> <message>`: APIs used without their `@grant`, GM APIs or
@@ -181,10 +220,11 @@ It reports `error|warn <rule> <file>:<line> <message>`: APIs used without their 
 missing from `@connect`, and similar. Fix every error; read each warning and fix it or say why it does not apply.
 It is a static check — it cannot tell whether the script does what the user asked.
 
-- **sctl is available** (`sctl status` shows ScriptCat connected): install it into the user's ScriptCat and
-  verify it in their browser, following [references/dev-loop.md](references/dev-loop.md). It also covers
-  scouting the target page before you write code, iterating on a local file without an approval per change, and
-  running background and scheduled scripts and reading their logs (`sctl run` / `sctl logs`). That loop runs inside the user's real browser, so the sctl skill's rules apply
+- **sctl is available** (`& $sctl status` shows ScriptCat connected, or `mcp__scriptcat__scripts_list` answers):
+  install it into the user's ScriptCat and verify it in their browser, following
+  [references/dev-loop.md](references/dev-loop.md). It also covers scouting the target page before you write code,
+  iterating on a local file without an approval per change, and running background and scheduled scripts and reading
+  their logs (`run` / `logs`). That loop runs inside the user's real browser, so the sctl skill's rules apply
   too — read it first if it is installed.
 - **No sctl:** save the code as `<name>.user.js` and tell the user to install it — drag the file onto the
   ScriptCat dashboard, or create a new script in ScriptCat and paste the code. Say which page to open (page

@@ -2,11 +2,14 @@
 
 ## One command: `sctl cdp send`
 
-```sh
-sctl cdp send <Domain.method> [--params '<JSON object>'] [--tab N] [--browser B] [--timeout 10s]
-sctl cdp send Page.getNavigationHistory --tab $TAB
-sctl cdp send Runtime.evaluate --params '{"expression":"document.title","returnByValue":true}' --tab $TAB
+```powershell
+& $sctl cdp send <Domain.method> [--params '<JSON object>'] [--tab N] [--browser B] [--timeout 10s]
+& $sctl cdp send Page.getNavigationHistory --tab $tab
+& $sctl cdp send Runtime.evaluate --params '{"expression":"document.title","returnByValue":true}' --tab $tab
 ```
+
+`--params` is one JSON argument: single quotes outside, JSON's own double quotes inside. Passing it through
+`cmd /c` or a bash shim mangles those quotes and yields `INVALID_REQUEST`.
 
 Reach for it only when no `page` or `debug` command does the job.
 
@@ -32,12 +35,23 @@ Reach for it only when no `page` or `debug` command does the job.
 
 ## Endpoint for Playwright and Puppeteer
 
-```sh
-sctl cdp endpoint            # create or show: both addresses, client state, expiry
-sctl cdp endpoint -o json    # read .endpoint.httpUrl and .endpoint.wsUrl
-sctl cdp status              # show it, or say there is none
-sctl cdp close               # expire it now and disconnect the client; fine when there is none
+```powershell
+& $sctl cdp endpoint            # create or show: both addresses, client state, expiry
+& $sctl cdp endpoint -o json    # read .endpoint.httpUrl and .endpoint.wsUrl (the JSON is nested, not top level)
+& $sctl cdp status              # show it, or say there is none
+& $sctl cdp close               # expire it now and disconnect the client; fine when there is none
 ```
+
+In PowerShell, keep the address in an environment variable rather than a file, and only for the child process:
+
+```powershell
+$env:SCTL_CDP_HTTP = (& $sctl cdp endpoint -o json | ConvertFrom-Json).endpoint.httpUrl
+node .\drive.mjs        # reads process.env.SCTL_CDP_HTTP
+Remove-Item Env:SCTL_CDP_HTTP
+& $sctl cdp close
+```
+
+Print no part of the address into a transcript, a report, or a commit: the secret in the path is the password.
 
 **The address is a password.** It carries a random secret, and whoever has it gets unapproved, full control of
 every tab Chrome lets a debugger attach to in that browser: reading pages and cookies, running scripts, sending

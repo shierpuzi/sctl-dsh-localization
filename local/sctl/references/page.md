@@ -84,14 +84,18 @@ A debug command on a tab that is not attached attaches it, which shows the infob
 Polling for new records: take the `next` cursor from a `-o json` result and pass it to `--after`. A cursor from
 before a clear or a re-attach starts over from the oldest record (`cursorReset`).
 
-A typical investigation:
+A typical investigation (PowerShell; `$sctl` is the absolute path, see the skill's Windows section):
 
-```sh
-sctl debug start --tab $TAB                    # attach and keep recording
+```powershell
+& $sctl debug start --tab $tab                   # attach and keep recording
 # reproduce the problem: the user does it, or you drive it with page commands
-sctl debug console --tab $TAB --level error    # exceptions and error logs
-sctl debug network --tab $TAB --failed         # requests that never got a response
-sctl debug network --tab $TAB --status 4xx     # server-side rejections
-sctl debug request 17 --tab $TAB --body        # dig into one request
-sctl debug stop --tab $TAB
+& $sctl debug console --tab $tab --level error   # exceptions and error logs
+& $sctl debug network --tab $tab --failed        # requests that never got a response
+& $sctl debug network --tab $tab --status 4xx    # server-side rejections
+& $sctl debug request 17 --tab $tab --body       # dig into one request
+& $sctl debug stop --tab $tab
 ```
+
+Quoting reminder: `page eval` takes one PowerShell string, so wrap the JavaScript in **single** quotes and use
+**double** quotes inside it — `'({title: document.title})'`. A trailing `;` inside `page eval` is fine; a top-level
+object literal without the wrapping parentheses is not.

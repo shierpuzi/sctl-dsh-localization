@@ -7,34 +7,66 @@ upstream/   官方 main 分支原样拷贝（未改动），附 SHA256SUMS.txt
 local/      本地化版本：面向 Windows + PowerShell 7 + DSH，并补进实测结论
 ```
 
-## 结论先说
+装到 DSH 里的是 `local/`：
 
-- **没有做本地化。** `local/` 目前与 `upstream/` 逐字节相同——我当初是直接从 GitHub 拉下来落盘的，
-  一个字符都没改。你说得对：仓库的 skill 不针对 DSH 做优化。
-- 逐文件校验（`SHA256SUMS.txt`）确认 `sctl/SKILL.md` 与 4 个 references 全部 identical。
+```powershell
+Copy-Item -Recurse -Force .\local\sctl                   "$env:DSH_HOME\skills\sctl"
+Copy-Item -Recurse -Force .\local\scriptcat-userscript   "$env:DSH_HOME\skills\scriptcat-userscript"
+```
 
-## 原版对 DSH + 本机的四处硬伤
+`dsh-skill-filesystem` 扫描 `<root>/<name>/SKILL.md`，落盘即热加载，不需要重启。
 
-| # | 原版写法 | 本机实际 | 后果 |
-|---|---|---|---|
-| 1 | 通篇 `sctl <cmd>` | DSH 的 shell 是常驻进程，**看不到**后来写进注册表的新 PATH；`sctl` 不在 PATH 里 | 裸 `sctl` 直接「不是内部或外部命令」 |
-| 2 | `TAB=$(sctl tabs open … -o json \| jq .tabId)` | **没有 jq**；PowerShell 里 `$( )` 是子表达式不是命令替换 | 取 tabId 的写法整段作废 |
-| 3 | 假设 bash/zsh 与 Unix 路径 | 是 PowerShell 7.6.6；`>` 重定向默认 UTF-8 无 BOM（已实测，正常） | 引号、管道、`export` 一类写法全要换 |
-| 4 | 面向 Claude Code / Codex 的挂载方式（`npx skills add -g`、`ln -s ~/.claude/skills`） | DSH 的技能根是 `$DSH_HOME/skills`，工具是 `plugin_manager` | 安装/更新路径完全不同，还牵扯审批与 HMR |
+## 改了什么
 
-另外原版把 `GM_log` 的参数顺序讲对了（`GM_log(message, level)`），这点原版没错——是我第一次照 Tampermonkey
-习惯写反了。这条会作为「实测结论」写进 local 版，避免下次再踩。
+### sctl
 
-## local/ 要做的事（待办）
+| 文件 | 改动 |
+|---|---|
+| `SKILL.md` | 新增开头一节 **"This machine: Windows + PowerShell + DSH"**：`$sctl` 绝对路径（裸 `sctl` 在常驻 shell 里不在 PATH）、`ConvertFrom-Json` 取代 `jq`、引号规则（单引号包 JS、内部双引号、对象字面量加圆括号）、`--params` JSON、`$LASTEXITCODE`、`>` 重定向是 UTF-8 无 BOM。全篇 `jq .tabId` / `TAB=$(…)` 示例改为 PowerShell；`browsers -o json` 的实际形状修正为裸数组；补 `status -o json` 的形状 |
+| `SKILL.md` | 新增结尾一节 **DSH specifics**：优先用 `mcp__scriptcat__*`（54 个工具，与 CLI 一一对应），何时仍用 CLI；审批策略在扩展卡片而非 sctl；两个通道之间可能出现的重连失败；本机布局表（二进制、任务计划、数据目录、地址、bundle） |
+| `SKILL.md` | 错误表：`PAGE_UNRESPONSIVE` 补「关标签页重开而不是原地重试」；`PAGE_NOT_AUTOMATABLE` 补 `edge://` 与扩展页面（配对码、策略开关、插件开关不可自动化） |
+| `SKILL.md` | 截图一节补两个坑：扩展名必须与 `--format` 一致；全页 PNG 会超 4 MiB，改 `--quality 60-70` + 视口 |
+| `references/page.md` | 调试流程示例改 PowerShell + 引号提醒 |
+| `references/cdp.md` | `cdp send` / `cdp endpoint` 改 PowerShell，补 `$env:SCTL_CDP_HTTP` 取用与清理，点明 JSON 是 `.endpoint.httpUrl` 嵌套 |
+| `references/scriptcat.md` | 编辑流程改 PowerShell，补 `-f edits.json` 的用法与 `$` 插值提醒，补 `GM_log(message, level)` 顺序 |
 
-1. **命令别名**：所有 `sctl` 统一改成 `$sctl`（会话开始时 `$sctl = "$env:LOCALAPPDATA\sctl\bin\sctl.exe"`），
-   或在正文开头给一次 `Set-Alias`；避免依赖 PATH。
-2. **jq 替换**：`| jq .tabId` → `| ConvertFrom-Json).tabId`；`jq '.tabs[] | select(...)'` → `... | ConvertFrom-Json).tabs | Where-Object { $_.url -match '…' }`。
-3. **引号规则**：`sctl page eval '({a: 1})'` 用单引号包住、内部用双引号；对象字面量必须带外层圆括号。
-4. **DSH 专章**：MCP 走 `sctl.exe mcp --name dsh`（bundle 见 `D:\text\sctl-dsh-bundle`），
-   工具名 `mcp__scriptcat__*`；写操作/读源码的审批策略在扩展卡片里，不在 sctl 里。
-5. **实测补丁**：`GM_log(msg, level)` 参数顺序、`tabs open` 返回时页面尚未加载完、截图扩展名必须与 `--format` 一致、
-   文档站重载后可能 `PAGE_UNRESPONSIVE`（关掉重开而不是重试）、`raw.githubusercontent.com` 在本机超时。
-6. **安装/更新**：`$DSH_HOME/skills/<name>/` 落盘即被发现（无需重启）；更新用 `cp` 覆盖 local/ 即可。
+官方原版内容（权限模型、审批、破坏性命令、退出码、错误码表）一字未动。
 
-改完用 `git diff --stat upstream local` 对照，必要时 `cp upstream/... local/...` 回滚。
+### scriptcat-userscript
+
+| 文件 | 改动 |
+|---|---|
+| `SKILL.md` | 新增 **第 0 节 "This machine: Windows + PowerShell + DSH"**：`$sctl`、`ConvertFrom-Json`、何时改用 MCP 工具、审批在扩展卡片、`$env:DSH_NODE_EXECUTABLE` 跑 `check.mjs` |
+| `SKILL.md` | 日志规则补 **`GM_log(message, level)` 顺序**：写反会被静默丢弃，日志里只剩 "exec script complete"（1.5.2 实测） |
+| `references/dev-loop.md` | 全文 PowerShell 化：`$sctl` 前缀、`ConvertFrom-Json).tabId`、`-f edits.json`、`file:///D:/…` 路径、`$env:DSH_NODE_EXECUTABLE`；「每次写操作都要审批」改为「先看策略，本机是直接允许」；新增末节 **本机实测坑**（6 条） |
+| `references/background.md` | `GM_log` 顺序告警 |
+| `README.md` | 补本机装法（`$DSH_HOME/skills` 拷贝）、本地化差异表、`PAGE_NOT_AUTOMATABLE` 对热重载的影响；提醒不要用 `npx skills update` 覆盖本地化 |
+
+## 回滚与更新
+
+```powershell
+# 单文件回滚
+git checkout upstream/local -- . ; # 或手工：
+Copy-Item -Recurse -Force .\upstream\sctl "$env:DSH_HOME\skills\sctl"
+
+# 全部回滚到上游
+Remove-Item -Recurse -Force "$env:DSH_HOME\skills\sctl","$env:DSH_HOME\skills\scriptcat-userscript"
+Copy-Item -Recurse -Force .\upstream\sctl,.\upstream\scriptcat-userscript "$env:DSH_HOME\skills\"
+```
+
+上游更新（`upstream/` 里是什么、什么时候拉的）：
+
+- `sctl`：GitHub `scriptscat/sctl` `main`，`skills/sctl/`，2026-11-23 拉取，对应 sctl v0.4.1 发布周期。
+- `scriptcat-userscript`：GitHub `scriptscat/scriptcat` `main`，`skills/scriptcat-userscript/`，同日拉取。
+
+更新流程：把新的上游文件放进 `upstream/`，`git diff upstream local` 看差异，手工合并到 `local/`，
+再拷进 `$DSH_HOME/skills`。`upstream/SHA256SUMS.txt` 是拉取时的基线，用来确认 `upstream/` 没被误改。
+
+## 已经实测验证过的改动
+
+- `$sctl` 绝对路径下 51 个 CLI 子命令可用；`ConvertFrom-Json).tabId`、`.tabs | Where-Object`、`.endpoint.httpUrl` 均验证。
+- `page eval '({…})'` 圆括号规则：不加括号报 `SyntaxError: Unexpected token ':'`，加括号正常。
+- `cdp send --params '{"…"}'` 单引号包 JSON：正常返回 Chrome 结果。
+- `-f edits.json` 走 PowerShell 写文件再编辑：锚点命中并生效（测试后已还原）。
+- 截图 `-f x.jpeg --format jpeg`：可正常读取；`-f x.png --format jpeg` 会被图像读取器拒收（本次实际踩到）。
+- `PAGE_UNRESPONSIVE` 用「关标签页重开」恢复：本次实际恢复成功。

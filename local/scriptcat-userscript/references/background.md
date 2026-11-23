@@ -76,9 +76,11 @@ To test an expression in an external cron tool, replace `once` with `*` and `onc
 
 - `GM_log(msg, level)` writes to ScriptCat's log: open ScriptCat's Logs page and filter by the script's `name` or
   `uuid`, or run `sctl logs <uuid>`. This is where background output goes; plain `console.log` is not shown there.
-  Release builds do not store `debug`-level entries.
+  Release builds do not store `debug`-level entries. **Message first, level second** — `GM_log("done", "warn")`.
+  Reversed arguments are dropped silently (the level string becomes the message, the real message is rejected as an
+  invalid level), so the only thing left in the log is ScriptCat's own "exec script complete". Verified on 1.5.2.
 - The script editor's Run button runs a background or scheduled script once, through the same path as
-  `sctl run` (see [dev-loop.md](dev-loop.md#verifying-background-and-scheduled-scripts)). A manual run does not
+  `run` (see [dev-loop.md](dev-loop.md#verifying-background-and-scheduled-scripts)). A manual run does not
   schedule `CATRetryError` retries.
 - The script list shows only the run status (running / error / stopped) and, for a scheduled script, the next
   run time — not the result or the log.
